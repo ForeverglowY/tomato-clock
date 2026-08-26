@@ -152,6 +152,17 @@ final class TomatoStore: ObservableObject {
         return result
     }
 
+    var chartAxisLabels: [String] {
+        let labels = stride(from: 0, to: dailyStatBars.count, by: 2).map {
+            Self.formatChartDay(dailyStatBars[$0].date)
+        }
+        guard labels.count > 7 else { return labels }
+        let step = Int(ceil(Double(labels.count) / 7.0))
+        var selected = stride(from: 0, to: labels.count, by: step).map { labels[$0] }
+        if let last = labels.last, selected.last != last { selected.append(last) }
+        return selected
+    }
+
     var filteredTotals: DayStats {
         dailyStatBars.reduce(into: DayStats()) { totals, bar in
             if bar.kind == .focus { totals.focusSeconds += bar.seconds }
@@ -380,5 +391,13 @@ final class TomatoStore: ObservableObject {
         let remainingSeconds = total % 60
         if hours > 0 { return "\(hours)小时 \(minutes)分" }
         return "\(minutes)分 \(remainingSeconds)秒"
+    }
+
+    static func formatChartDay(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.calendar = .current
+        formatter.locale = Locale(identifier: "zh_CN")
+        formatter.dateFormat = "M月d日"
+        return formatter.string(from: date)
     }
 }

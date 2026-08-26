@@ -95,7 +95,7 @@ struct StatisticsView: View {
             Text("每日时长").font(.headline)
             Chart(store.dailyStatBars) { bar in
                 BarMark(
-                    x: .value("日期", bar.date, unit: .day),
+                    x: .value("日期", TomatoStore.formatChartDay(bar.date)),
                     y: .value("分钟", bar.seconds / 60)
                 )
                 .foregroundStyle(by: .value("类型", bar.kind == .focus ? "专注" : "休息"))
@@ -103,10 +103,10 @@ struct StatisticsView: View {
             }
             .chartForegroundStyleScale(["专注": Color.red, "休息": Color.green])
             .chartXAxis {
-                AxisMarks(values: .automatic(desiredCount: 7)) { value in
+                AxisMarks(values: store.chartAxisLabels) { _ in
                     AxisGridLine()
                     AxisTick()
-                    AxisValueLabel(format: .dateTime.month().day())
+                    AxisValueLabel()
                 }
             }
             .chartYAxisLabel("分钟")
