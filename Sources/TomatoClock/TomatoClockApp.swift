@@ -26,5 +26,11 @@ struct TomatoClockApp: App {
             MenuBarTimerLabel(store: store)
         }
         .menuBarExtraStyle(.window)
+
+        Window("番茄钟统计", id: "statistics") {
+            StatisticsView(store: store)
+        }
+        .defaultSize(width: 820, height: 680)
+        .windowResizability(.contentMinSize)
     }
 }

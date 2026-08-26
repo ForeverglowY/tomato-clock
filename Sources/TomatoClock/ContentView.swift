@@ -2,6 +2,7 @@ import SwiftUI
 
 struct ContentView: View {
     @ObservedObject var store: TomatoStore
+    @Environment(\.openWindow) private var openWindow
 
     var body: some View {
         VStack(spacing: 16) {
@@ -98,7 +99,8 @@ struct ContentView: View {
                     .font(.caption)
                     .foregroundStyle(.tertiary)
                 Spacer()
-                Button("退出") { NSApplication.shared.terminate(nil) }
+                Button("详细统计") { openWindow(id: "statistics") }
+                Button("退出") { store.terminateApplication() }
             }
         }
         .padding(18)

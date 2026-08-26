@@ -36,11 +36,28 @@ final class TomatoStore: ObservableObject {
         static let dailyStats = "dailyStats"
         static let alertSound = "alertSound"
         static let alertVolume = "alertVolume"
+        static let sessionRecords = "sessionRecords"
     }
 
     struct DayStats: Codable, Equatable {
         var focusSeconds: TimeInterval = 0
         var breakSeconds: TimeInterval = 0
+    }
+
+    struct SessionRecord: Codable, Identifiable, Equatable {
+        let id: UUID
+        let kind: SessionKind
+        let startDate: Date
+        let endDate: Date
+        let duration: TimeInterval
+    }
+
+    struct DailyStatBar: Identifiable {
+        let date: Date
+        let kind: SessionKind
+        let seconds: TimeInterval
+
+        var id: String { "\(date.timeIntervalSinceReferenceDate)-\(kind.rawValue)" }
     }
 
     @Published private(set) var focusMinutes: Int {
@@ -63,12 +80,17 @@ final class TomatoStore: ObservableObject {
     @Published private(set) var alertVolume: Double {
         didSet { defaults.set(alertVolume, forKey: Keys.alertVolume) }
     }
+    @Published private(set) var sessionRecords: [SessionRecord] = []
+    @Published private(set) var statisticsStartDate: Date
+    @Published private(set) var statisticsEndDate: Date
 
     private let defaults: UserDefaults
     private var allStats: [String: DayStats] = [:]
     private var timer: Timer?
     private var currentDayKey: String
     private var playingSound: NSSound?
+    private var runningSegmentStart: Date?
+    private var runningSegmentBudget: TimeInterval = 0
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -82,9 +104,14 @@ final class TomatoStore: ObservableObject {
         alertVolume = defaults.object(forKey: Keys.alertVolume) == nil
             ? 0.8
             : min(max(defaults.double(forKey: Keys.alertVolume), 0), 1)
+        let calendar = Calendar.current
+        let today = calendar.startOfDay(for: .now)
+        statisticsStartDate = calendar.date(byAdding: .day, value: -6, to: today) ?? today
+        statisticsEndDate = today
         engine = TimerEngine(duration: TimeInterval(validFocus * 60))
         currentDayKey = Self.dayKey(for: .now)
         loadStats()
+        loadSessionRecords()
         todayStats = allStats[currentDayKey] ?? DayStats()
         timer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.tick() }
@@ -101,6 +128,35 @@ final class TomatoStore: ObservableObject {
         if engine.isRunning { return kind == .focus ? "正在专注" : "正在休息" }
         if engine.remaining == 0 { return kind == .focus ? "专注完成" : "休息完成" }
         return kind == .focus ? "准备专注" : "准备休息"
+    }
+
+    var filteredSessionRecords: [SessionRecord] {
+        let interval = statisticsDateInterval
+        return sessionRecords
+            .filter { $0.endDate > interval.start && $0.startDate < interval.end }
+            .sorted { $0.startDate > $1.startDate }
+    }
+
+    var dailyStatBars: [DailyStatBar] {
+        let calendar = Calendar.current
+        var date = calendar.startOfDay(for: statisticsStartDate)
+        let last = calendar.startOfDay(for: statisticsEndDate)
+        var result: [DailyStatBar] = []
+        while date <= last {
+            let stats = allStats[Self.dayKey(for: date)] ?? DayStats()
+            result.append(DailyStatBar(date: date, kind: .focus, seconds: stats.focusSeconds))
+            result.append(DailyStatBar(date: date, kind: .breakTime, seconds: stats.breakSeconds))
+            guard let next = calendar.date(byAdding: .day, value: 1, to: date) else { break }
+            date = next
+        }
+        return result
+    }
+
+    var filteredTotals: DayStats {
+        dailyStatBars.reduce(into: DayStats()) { totals, bar in
+            if bar.kind == .focus { totals.focusSeconds += bar.seconds }
+            else { totals.breakSeconds += bar.seconds }
+        }
     }
 
     func setFocusMinutes(_ minutes: Int) {
@@ -123,31 +179,70 @@ final class TomatoStore: ObservableObject {
         playAlertSound()
     }
 
-    func toggleRunning() {
+    func setStatisticsStartDate(_ date: Date) {
+        let day = Calendar.current.startOfDay(for: date)
+        statisticsStartDate = min(day, statisticsEndDate)
+    }
+
+    func setStatisticsEndDate(_ date: Date) {
+        let day = Calendar.current.startOfDay(for: date)
+        statisticsEndDate = max(day, statisticsStartDate)
+    }
+
+    func selectStatisticsRange(days: Int) {
+        let calendar = Calendar.current
+        let today = calendar.startOfDay(for: .now)
+        statisticsEndDate = today
+        statisticsStartDate = calendar.date(byAdding: .day, value: -(max(days, 1) - 1), to: today) ?? today
+    }
+
+    func terminateApplication() {
         if engine.isRunning {
-            record(engine.pause(at: .now), for: engine.kind, at: .now)
+            let now = Date.now
+            record(engine.pause(at: now), for: engine.kind, at: now)
+            finishRunningSegment(at: now)
+        }
+        NSApplication.shared.terminate(nil)
+    }
+
+    func toggleRunning() {
+        let now = Date.now
+        if engine.isRunning {
+            record(engine.pause(at: now), for: engine.kind, at: now)
+            finishRunningSegment(at: now)
         } else {
             if engine.remaining == 0 {
                 engine.reset(duration: duration(for: engine.kind))
             }
-            engine.start(at: .now)
+            beginRunningSegment(at: now)
+            engine.start(at: now)
         }
     }
 
     func resetCurrent() {
-        if engine.isRunning { record(engine.pause(at: .now), for: engine.kind, at: .now) }
+        if engine.isRunning {
+            let now = Date.now
+            record(engine.pause(at: now), for: engine.kind, at: now)
+            finishRunningSegment(at: now)
+        }
         engine.reset(duration: duration(for: engine.kind))
     }
 
     func switchSession() {
-        if engine.isRunning { record(engine.pause(at: .now), for: engine.kind, at: .now) }
+        if engine.isRunning {
+            let now = Date.now
+            record(engine.pause(at: now), for: engine.kind, at: now)
+            finishRunningSegment(at: now)
+        }
         let next = engine.kind.next
         engine.prepare(next, duration: duration(for: next))
     }
 
     func startPreparedSession() {
         if engine.remaining == 0 { switchSession() }
-        engine.start(at: .now)
+        let now = Date.now
+        beginRunningSegment(at: now)
+        engine.start(at: now)
     }
 
     private func tick() {
@@ -157,11 +252,42 @@ final class TomatoStore: ObservableObject {
         let elapsed = engine.advance(to: .now)
         record(elapsed, for: completedKind, at: .now)
         if wasRunning, !engine.isRunning, engine.remaining == 0 {
+            finishRunningSegment(at: .now)
             let next = completedKind.next
             engine.prepare(next, duration: duration(for: next))
             playAlertSound()
             showCompletionAlert(completedKind: completedKind, nextKind: next)
         }
+    }
+
+    private var statisticsDateInterval: DateInterval {
+        let calendar = Calendar.current
+        let start = calendar.startOfDay(for: statisticsStartDate)
+        let endDay = calendar.startOfDay(for: statisticsEndDate)
+        let end = calendar.date(byAdding: .day, value: 1, to: endDay) ?? endDay
+        return DateInterval(start: start, end: end)
+    }
+
+    private func beginRunningSegment(at date: Date) {
+        runningSegmentStart = date
+        runningSegmentBudget = engine.remaining
+    }
+
+    private func finishRunningSegment(at date: Date) {
+        guard let start = runningSegmentStart else { return }
+        let duration = min(max(date.timeIntervalSince(start), 0), runningSegmentBudget)
+        runningSegmentStart = nil
+        runningSegmentBudget = 0
+        guard duration >= 0.5 else { return }
+        let record = SessionRecord(
+            id: UUID(),
+            kind: engine.kind,
+            startDate: start,
+            endDate: start.addingTimeInterval(duration),
+            duration: duration
+        )
+        sessionRecords.append(record)
+        saveSessionRecords()
     }
 
     private func playAlertSound() {
@@ -218,6 +344,17 @@ final class TomatoStore: ObservableObject {
         defaults.set(data, forKey: Keys.dailyStats)
     }
 
+    private func loadSessionRecords() {
+        guard let data = defaults.data(forKey: Keys.sessionRecords),
+              let decoded = try? JSONDecoder().decode([SessionRecord].self, from: data) else { return }
+        sessionRecords = decoded
+    }
+
+    private func saveSessionRecords() {
+        guard let data = try? JSONEncoder().encode(sessionRecords) else { return }
+        defaults.set(data, forKey: Keys.sessionRecords)
+    }
+
     static func dayKey(for date: Date) -> String {
         let formatter = DateFormatter()
         formatter.calendar = .current
@@ -234,5 +371,14 @@ final class TomatoStore: ObservableObject {
     static func formatStats(_ seconds: TimeInterval) -> String {
         let totalMinutes = Int(seconds) / 60
         return "\(totalMinutes / 60) 小时 \(totalMinutes % 60) 分钟"
+    }
+
+    static func formatPreciseDuration(_ seconds: TimeInterval) -> String {
+        let total = max(0, Int(seconds.rounded()))
+        let hours = total / 3_600
+        let minutes = (total % 3_600) / 60
+        let remainingSeconds = total % 60
+        if hours > 0 { return "\(hours)小时 \(minutes)分" }
+        return "\(minutes)分 \(remainingSeconds)秒"
     }
 }
