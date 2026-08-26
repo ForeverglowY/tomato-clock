@@ -99,12 +99,28 @@ struct ContentView: View {
                     .font(.caption)
                     .foregroundStyle(.tertiary)
                 Spacer()
-                Button("详细统计") { openWindow(id: "statistics") }
+                Button("详细统计") { showStatisticsWindow() }
                 Button("退出") { store.terminateApplication() }
             }
         }
         .padding(18)
         .frame(width: 390)
+    }
+
+    private func showStatisticsWindow() {
+        NSApplication.shared.activate(ignoringOtherApps: true)
+        openWindow(id: "statistics")
+
+        // SwiftUI creates the secondary window on the next run-loop pass.
+        // Raise that window explicitly because this menu bar app uses accessory activation policy.
+        DispatchQueue.main.async {
+            NSApplication.shared.activate(ignoringOtherApps: true)
+            guard let statisticsWindow = NSApplication.shared.windows.first(where: {
+                $0.title == "番茄钟统计"
+            }) else { return }
+            statisticsWindow.makeKeyAndOrderFront(nil)
+            statisticsWindow.orderFrontRegardless()
+        }
     }
 
     private func durationInput(value: Binding<Int>, range: ClosedRange<Int>) -> some View {
