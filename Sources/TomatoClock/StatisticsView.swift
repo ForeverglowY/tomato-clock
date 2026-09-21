@@ -69,7 +69,24 @@ struct StatisticsView: View {
                 icon: "list.bullet.rectangle",
                 color: .blue
             )
+            goalSummaryCard
         }
+    }
+
+    private var goalSummaryCard: some View {
+        HStack(spacing: 10) {
+            FocusGoalRing(progress: store.filteredGoalProgress, size: 38, lineWidth: 5)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("目标达成").font(.caption).foregroundStyle(.secondary)
+                Text("\(store.filteredAchievedDayCount) / \(store.filteredDayCount) 天")
+                    .font(.headline)
+                    .monospacedDigit()
+            }
+            Spacer()
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity)
+        .background(.orange.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
     }
 
     private func summaryCard(title: String, value: String, icon: String, color: Color) -> some View {
@@ -93,13 +110,23 @@ struct StatisticsView: View {
     private var chart: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("每日时长").font(.headline)
-            Chart(store.dailyStatBars) { bar in
-                BarMark(
-                    x: .value("日期", TomatoStore.formatChartDay(bar.date)),
-                    y: .value("分钟", bar.seconds / 60)
-                )
-                .foregroundStyle(by: .value("类型", bar.kind == .focus ? "专注" : "休息"))
-                .position(by: .value("类型", bar.kind.rawValue))
+            Chart {
+                ForEach(store.dailyStatBars) { bar in
+                    BarMark(
+                        x: .value("日期", TomatoStore.formatChartDay(bar.date)),
+                        y: .value("分钟", bar.seconds / 60)
+                    )
+                    .foregroundStyle(by: .value("类型", bar.kind == .focus ? "专注" : "休息"))
+                    .position(by: .value("类型", bar.kind.rawValue))
+                }
+                RuleMark(y: .value("每日目标", store.dailyFocusGoalMinutes))
+                    .foregroundStyle(.orange)
+                    .lineStyle(StrokeStyle(lineWidth: 1.5, dash: [5, 4]))
+                    .annotation(position: .top, alignment: .trailing) {
+                        Text("目标 \(store.dailyFocusGoalMinutes) 分钟")
+                            .font(.caption)
+                            .foregroundStyle(.orange)
+                    }
             }
             .chartForegroundStyleScale(["专注": Color.red, "休息": Color.green])
             .chartXAxis {

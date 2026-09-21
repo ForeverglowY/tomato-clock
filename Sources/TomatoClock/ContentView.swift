@@ -46,6 +46,16 @@ struct ContentView: View {
                         range: 1...60
                     )
                 }
+                GridRow {
+                    Text("每日目标")
+                    durationInput(
+                        value: Binding(
+                            get: { store.dailyFocusGoalMinutes },
+                            set: store.setDailyFocusGoalMinutes
+                        ),
+                        range: 1...720
+                    )
+                }
             }
             .disabled(store.isRunning)
 
@@ -83,15 +93,36 @@ struct ContentView: View {
 
             Divider()
 
-            VStack(alignment: .leading, spacing: 8) {
-                Text("今日统计").font(.headline)
-                HStack {
-                    Label(TomatoStore.formatStats(store.todayStats.focusSeconds), systemImage: "brain.head.profile")
-                    Spacer()
-                    Label(TomatoStore.formatStats(store.todayStats.breakSeconds), systemImage: "cup.and.saucer")
+            HStack(spacing: 14) {
+                FocusGoalRing(progress: store.dailyFocusGoalProgress, size: 62, lineWidth: 8)
+                VStack(alignment: .leading, spacing: 5) {
+                    HStack {
+                        Text("今日专注目标").font(.headline)
+                        if store.dailyFocusGoalAchieved {
+                            Text("已达成")
+                                .font(.caption.bold())
+                                .foregroundStyle(.green)
+                        }
+                    }
+                    Text("\(TomatoStore.formatStats(store.todayStats.focusSeconds)) / \(store.dailyFocusGoalMinutes) 分钟")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                    Text("完成 \(store.dailyFocusGoalPercentage)%")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
-                .foregroundStyle(.secondary)
+                Spacer()
             }
+            .padding(12)
+            .background(.orange.opacity(0.07), in: RoundedRectangle(cornerRadius: 12))
+
+            HStack {
+                Label(TomatoStore.formatStats(store.todayStats.focusSeconds), systemImage: "brain.head.profile")
+                Spacer()
+                Label(TomatoStore.formatStats(store.todayStats.breakSeconds), systemImage: "cup.and.saucer")
+            }
+            .font(.callout)
+            .foregroundStyle(.secondary)
 
             Divider()
             HStack {

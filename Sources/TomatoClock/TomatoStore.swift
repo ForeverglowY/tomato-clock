@@ -37,6 +37,8 @@ final class TomatoStore: ObservableObject {
         static let alertSound = "alertSound"
         static let alertVolume = "alertVolume"
         static let sessionRecords = "sessionRecords"
+        static let dailyFocusGoalMinutes = "dailyFocusGoalMinutes"
+        static let lastCelebratedGoalDay = "lastCelebratedGoalDay"
     }
 
     struct DayStats: Codable, Equatable {
@@ -83,6 +85,9 @@ final class TomatoStore: ObservableObject {
     @Published private(set) var sessionRecords: [SessionRecord] = []
     @Published private(set) var statisticsStartDate: Date
     @Published private(set) var statisticsEndDate: Date
+    @Published private(set) var dailyFocusGoalMinutes: Int {
+        didSet { defaults.set(dailyFocusGoalMinutes, forKey: Keys.dailyFocusGoalMinutes) }
+    }
 
     private let defaults: UserDefaults
     private var allStats: [String: DayStats] = [:]
@@ -91,6 +96,7 @@ final class TomatoStore: ObservableObject {
     private var playingSound: NSSound?
     private var runningSegmentStart: Date?
     private var runningSegmentBudget: TimeInterval = 0
+    private var lastCelebratedGoalDay: String?
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -98,8 +104,10 @@ final class TomatoStore: ObservableObject {
         let storedBreak = defaults.integer(forKey: Keys.breakMinutes)
         let validFocus = min(max(storedFocus > 0 ? storedFocus : 25, 1), 180)
         let validBreak = min(max(storedBreak > 0 ? storedBreak : 5, 1), 60)
+        let storedGoal = defaults.integer(forKey: Keys.dailyFocusGoalMinutes)
         focusMinutes = validFocus
         breakMinutes = validBreak
+        dailyFocusGoalMinutes = min(max(storedGoal > 0 ? storedGoal : 120, 1), 720)
         alertSound = AlertSound(rawValue: defaults.string(forKey: Keys.alertSound) ?? "") ?? .glass
         alertVolume = defaults.object(forKey: Keys.alertVolume) == nil
             ? 0.8
@@ -113,6 +121,7 @@ final class TomatoStore: ObservableObject {
         loadStats()
         loadSessionRecords()
         todayStats = allStats[currentDayKey] ?? DayStats()
+        lastCelebratedGoalDay = defaults.string(forKey: Keys.lastCelebratedGoalDay)
         timer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.tick() }
         }
@@ -129,6 +138,14 @@ final class TomatoStore: ObservableObject {
         if engine.remaining == 0 { return kind == .focus ? "专注完成" : "休息完成" }
         return kind == .focus ? "准备专注" : "准备休息"
     }
+
+    var dailyFocusGoalSeconds: TimeInterval { TimeInterval(dailyFocusGoalMinutes * 60) }
+    var dailyFocusGoalProgress: Double {
+        guard dailyFocusGoalSeconds > 0 else { return 0 }
+        return min(todayStats.focusSeconds / dailyFocusGoalSeconds, 1)
+    }
+    var dailyFocusGoalPercentage: Int { Int((dailyFocusGoalProgress * 100).rounded()) }
+    var dailyFocusGoalAchieved: Bool { todayStats.focusSeconds >= dailyFocusGoalSeconds }
 
     var filteredSessionRecords: [SessionRecord] {
         let interval = statisticsDateInterval
@@ -170,12 +187,25 @@ final class TomatoStore: ObservableObject {
         }
     }
 
+    var filteredDayCount: Int { dailyStatBars.count / 2 }
+    var filteredAchievedDayCount: Int {
+        dailyStatBars.filter { $0.kind == .focus && $0.seconds >= dailyFocusGoalSeconds }.count
+    }
+    var filteredGoalProgress: Double {
+        guard filteredDayCount > 0 else { return 0 }
+        return Double(filteredAchievedDayCount) / Double(filteredDayCount)
+    }
+
     func setFocusMinutes(_ minutes: Int) {
         focusMinutes = min(max(minutes, 1), 180)
     }
 
     func setBreakMinutes(_ minutes: Int) {
         breakMinutes = min(max(minutes, 1), 60)
+    }
+
+    func setDailyFocusGoalMinutes(_ minutes: Int) {
+        dailyFocusGoalMinutes = min(max(minutes, 1), 720)
     }
 
     func setAlertSound(_ sound: AlertSound) {
@@ -211,7 +241,7 @@ final class TomatoStore: ObservableObject {
         if engine.isRunning {
             let now = Date.now
             record(engine.pause(at: now), for: engine.kind, at: now)
-            finishRunningSegment(at: now)
+            _ = finishRunningSegment(at: now, evaluateGoal: false)
         }
         NSApplication.shared.terminate(nil)
     }
@@ -220,7 +250,7 @@ final class TomatoStore: ObservableObject {
         let now = Date.now
         if engine.isRunning {
             record(engine.pause(at: now), for: engine.kind, at: now)
-            finishRunningSegment(at: now)
+            if finishRunningSegment(at: now) { showGoalCelebration() }
         } else {
             if engine.remaining == 0 {
                 engine.reset(duration: duration(for: engine.kind))
@@ -234,7 +264,7 @@ final class TomatoStore: ObservableObject {
         if engine.isRunning {
             let now = Date.now
             record(engine.pause(at: now), for: engine.kind, at: now)
-            finishRunningSegment(at: now)
+            if finishRunningSegment(at: now) { showGoalCelebration() }
         }
         engine.reset(duration: duration(for: engine.kind))
     }
@@ -243,7 +273,7 @@ final class TomatoStore: ObservableObject {
         if engine.isRunning {
             let now = Date.now
             record(engine.pause(at: now), for: engine.kind, at: now)
-            finishRunningSegment(at: now)
+            if finishRunningSegment(at: now) { showGoalCelebration() }
         }
         let next = engine.kind.next
         engine.prepare(next, duration: duration(for: next))
@@ -263,11 +293,12 @@ final class TomatoStore: ObservableObject {
         let elapsed = engine.advance(to: .now)
         record(elapsed, for: completedKind, at: .now)
         if wasRunning, !engine.isRunning, engine.remaining == 0 {
-            finishRunningSegment(at: .now)
+            let reachedGoal = finishRunningSegment(at: .now)
             let next = completedKind.next
             engine.prepare(next, duration: duration(for: next))
-            playAlertSound()
-            showCompletionAlert(completedKind: completedKind, nextKind: next)
+            if reachedGoal { playCelebrationSound() }
+            else { playAlertSound() }
+            showCompletionAlert(completedKind: completedKind, nextKind: next, reachedGoal: reachedGoal)
         }
     }
 
@@ -284,21 +315,32 @@ final class TomatoStore: ObservableObject {
         runningSegmentBudget = engine.remaining
     }
 
-    private func finishRunningSegment(at date: Date) {
-        guard let start = runningSegmentStart else { return }
+    private func finishRunningSegment(at date: Date, evaluateGoal: Bool = true) -> Bool {
+        guard let start = runningSegmentStart else { return false }
         let duration = min(max(date.timeIntervalSince(start), 0), runningSegmentBudget)
         runningSegmentStart = nil
         runningSegmentBudget = 0
-        guard duration >= 0.5 else { return }
+        guard duration >= 0.5 else { return false }
+        let completedKind = engine.kind
         let record = SessionRecord(
             id: UUID(),
-            kind: engine.kind,
+            kind: completedKind,
             startDate: start,
             endDate: start.addingTimeInterval(duration),
             duration: duration
         )
         sessionRecords.append(record)
         saveSessionRecords()
+        guard completedKind == .focus, evaluateGoal else { return false }
+        return markGoalCelebratedIfNeeded()
+    }
+
+    private func markGoalCelebratedIfNeeded() -> Bool {
+        let todayKey = Self.dayKey(for: .now)
+        guard dailyFocusGoalAchieved, lastCelebratedGoalDay != todayKey else { return false }
+        lastCelebratedGoalDay = todayKey
+        defaults.set(todayKey, forKey: Keys.lastCelebratedGoalDay)
+        return true
     }
 
     private func playAlertSound() {
@@ -312,15 +354,40 @@ final class TomatoStore: ObservableObject {
         sound.play()
     }
 
-    private func showCompletionAlert(completedKind: SessionKind, nextKind: SessionKind) {
+    private func playCelebrationSound() {
+        playingSound?.stop()
+        guard let sound = NSSound(named: NSSound.Name("Hero")) else {
+            NSSound.beep()
+            return
+        }
+        sound.volume = Float(alertVolume)
+        playingSound = sound
+        sound.play()
+    }
+
+    private func showGoalCelebration() {
+        playCelebrationSound()
         NSApplication.shared.activate(ignoringOtherApps: true)
         let alert = NSAlert()
         alert.alertStyle = .informational
-        alert.messageText = completedKind == .focus ? "专注结束" : "休息结束"
-        alert.informativeText = nextKind == .breakTime
+        alert.messageText = "🎉 今日专注目标达成！"
+        alert.informativeText = "今天已经专注 \(Self.formatStats(todayStats.focusSeconds))，完成了 \(dailyFocusGoalMinutes) 分钟目标。继续保持！"
+        alert.addButton(withTitle: "太棒了")
+        alert.runModal()
+    }
+
+    private func showCompletionAlert(completedKind: SessionKind, nextKind: SessionKind, reachedGoal: Bool) {
+        NSApplication.shared.activate(ignoringOtherApps: true)
+        let alert = NSAlert()
+        alert.alertStyle = .informational
+        alert.messageText = reachedGoal ? "🎉 今日专注目标达成！" : (completedKind == .focus ? "专注结束" : "休息结束")
+        let nextMessage = nextKind == .breakTime
             ? "休息已准备好，点击菜单栏中的“开始休息”后才会开始计时。"
             : "下一轮专注已准备好，点击菜单栏中的“开始专注”后才会开始计时。"
-        alert.addButton(withTitle: "知道了")
+        alert.informativeText = reachedGoal
+            ? "今天已专注 \(Self.formatStats(todayStats.focusSeconds))，完成 \(dailyFocusGoalMinutes) 分钟目标。\n\n\(nextMessage)"
+            : nextMessage
+        alert.addButton(withTitle: reachedGoal ? "太棒了" : "知道了")
         alert.runModal()
     }
 
