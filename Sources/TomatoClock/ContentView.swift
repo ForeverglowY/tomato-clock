@@ -17,12 +17,15 @@ struct ContentView: View {
             Text(store.formattedRemaining)
                 .font(.system(size: 44, weight: .semibold, design: .rounded))
                 .monospacedDigit()
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 12)
+                .adaptiveGlassCard(cornerRadius: 18, tint: store.kind == .focus ? .red.opacity(0.12) : .green.opacity(0.12))
 
             HStack {
                 Button(store.isRunning ? "暂停" : (store.kind == .focus ? "开始专注" : "开始休息")) {
                     store.toggleRunning()
                 }
-                .buttonStyle(.borderedProminent)
+                .adaptivePrimaryButton(tint: store.kind == .focus ? .red : .green)
                 .keyboardShortcut(.space, modifiers: [])
 
                 Button("重置") { store.resetCurrent() }
@@ -57,6 +60,8 @@ struct ContentView: View {
                     )
                 }
             }
+            .padding(12)
+            .adaptiveGlassCard(cornerRadius: 14)
             .disabled(store.isRunning)
 
             Grid(alignment: .leading, horizontalSpacing: 14, verticalSpacing: 10) {
@@ -90,6 +95,8 @@ struct ContentView: View {
                     .frame(width: 210)
                 }
             }
+            .padding(12)
+            .adaptiveGlassCard(cornerRadius: 14)
 
             Divider()
 
@@ -114,7 +121,7 @@ struct ContentView: View {
                 Spacer()
             }
             .padding(12)
-            .background(.orange.opacity(0.07), in: RoundedRectangle(cornerRadius: 12))
+            .adaptiveGlassCard(cornerRadius: 14, tint: .orange.opacity(0.12), interactive: true)
 
             HStack {
                 Label(TomatoStore.formatStats(store.todayStats.focusSeconds), systemImage: "brain.head.profile")

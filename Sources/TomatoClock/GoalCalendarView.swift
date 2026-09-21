@@ -45,6 +45,8 @@ struct GoalCalendarView: View {
                 }
             }
         }
+        .padding(12)
+        .adaptiveGlassCard(cornerRadius: 16, tint: .orange.opacity(0.05))
     }
 
     private func dayCell(_ day: TomatoStore.GoalDay) -> some View {
