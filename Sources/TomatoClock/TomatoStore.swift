@@ -44,6 +44,7 @@ final class TomatoStore: ObservableObject {
         static let dailyStats = "dailyStats"
         static let alertSound = "alertSound"
         static let alertVolume = "alertVolume"
+        static let glassOpacity = "glassOpacity"
         static let sessionRecords = "sessionRecords"
         static let dailyFocusGoalMinutes = "dailyFocusGoalMinutes"
         static let lastCelebratedGoalDay = "lastCelebratedGoalDay"
@@ -108,6 +109,9 @@ final class TomatoStore: ObservableObject {
     @Published private(set) var alertVolume: Double {
         didSet { defaults.set(alertVolume, forKey: Keys.alertVolume) }
     }
+    @Published private(set) var glassOpacity: Double {
+        didSet { defaults.set(glassOpacity, forKey: Keys.glassOpacity) }
+    }
     @Published private(set) var sessionRecords: [SessionRecord] = []
     @Published private(set) var statisticsStartDate: Date
     @Published private(set) var statisticsEndDate: Date
@@ -139,6 +143,9 @@ final class TomatoStore: ObservableObject {
         alertVolume = defaults.object(forKey: Keys.alertVolume) == nil
             ? 0.8
             : min(max(defaults.double(forKey: Keys.alertVolume), 0), 1)
+        glassOpacity = defaults.object(forKey: Keys.glassOpacity) == nil
+            ? 0.7
+            : min(max(defaults.double(forKey: Keys.glassOpacity), 0.2), 1)
         let calendar = Calendar.current
         let today = calendar.startOfDay(for: .now)
         statisticsStartDate = calendar.date(byAdding: .day, value: -6, to: today) ?? today
@@ -254,6 +261,10 @@ final class TomatoStore: ObservableObject {
 
     func setDailyFocusGoalMinutes(_ minutes: Int) {
         dailyFocusGoalMinutes = min(max(minutes, 1), 720)
+    }
+
+    func setGlassOpacity(_ opacity: Double) {
+        glassOpacity = min(max(opacity, 0.2), 1)
     }
 
     func setStatisticsDisplayMode(_ mode: StatisticsDisplayMode) {

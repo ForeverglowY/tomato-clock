@@ -104,7 +104,7 @@ struct StatisticsView: View {
         }
         .padding(12)
         .frame(maxWidth: .infinity)
-        .adaptiveGlassCard(cornerRadius: 12, tint: .orange.opacity(0.1), interactive: true)
+        .adaptiveGlassCard(cornerRadius: 12, tint: .orange.opacity(0.1), interactive: true, opacity: store.glassOpacity)
     }
 
     private func summaryCard(title: String, value: String, icon: String, color: Color) -> some View {
@@ -122,7 +122,7 @@ struct StatisticsView: View {
         }
         .padding(12)
         .frame(maxWidth: .infinity)
-        .adaptiveGlassCard(cornerRadius: 12, tint: color.opacity(0.07), interactive: true)
+        .adaptiveGlassCard(cornerRadius: 12, tint: color.opacity(0.07), interactive: true, opacity: store.glassOpacity)
     }
 
     private var chart: some View {
