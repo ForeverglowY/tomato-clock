@@ -1,17 +1,33 @@
 import SwiftUI
 
+private struct GlassPanelKey: EnvironmentKey {
+    static let defaultValue = false
+}
+
+extension EnvironmentValues {
+    var isInsideGlassPanel: Bool {
+        get { self[GlassPanelKey.self] }
+        set { self[GlassPanelKey.self] = newValue }
+    }
+}
+
 private struct AdaptiveGlassCardModifier: ViewModifier {
+    @Environment(\.isInsideGlassPanel) private var isInsideGlassPanel
     let cornerRadius: CGFloat
     let tint: Color?
     let interactive: Bool
-    let opacity: Double
 
     @ViewBuilder
     func body(content: Content) -> some View {
-        if #available(macOS 26.0, *) {
+        if isInsideGlassPanel {
+            content.background {
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .fill(tint ?? .primary.opacity(0.04))
+            }
+        } else if #available(macOS 26.0, *) {
             content.glassEffect(
                 .regular
-                    .tint((tint ?? .white).opacity(opacity * (tint == nil ? 0.12 : 1)))
+                    .tint(tint)
                     .interactive(interactive),
                 in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
             )
@@ -20,11 +36,10 @@ private struct AdaptiveGlassCardModifier: ViewModifier {
                 .background(
                     RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                         .fill(.ultraThinMaterial)
-                        .opacity(opacity)
                 )
                 .overlay {
                     RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                        .stroke(.white.opacity(0.08 + opacity * 0.12), lineWidth: 0.75)
+                        .stroke(.white.opacity(0.16), lineWidth: 0.75)
                 }
         }
     }
@@ -47,14 +62,12 @@ extension View {
     func adaptiveGlassCard(
         cornerRadius: CGFloat = 14,
         tint: Color? = nil,
-        interactive: Bool = false,
-        opacity: Double = 0.7
+        interactive: Bool = false
     ) -> some View {
         modifier(AdaptiveGlassCardModifier(
             cornerRadius: cornerRadius,
             tint: tint,
-            interactive: interactive,
-            opacity: min(max(opacity, 0.2), 1)
+            interactive: interactive
         ))
     }
 

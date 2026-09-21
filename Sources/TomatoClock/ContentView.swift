@@ -2,6 +2,7 @@ import SwiftUI
 
 struct ContentView: View {
     @ObservedObject var store: TomatoStore
+    var onShowStatistics: (() -> Void)? = nil
     @Environment(\.openWindow) private var openWindow
 
     var body: some View {
@@ -19,7 +20,7 @@ struct ContentView: View {
                 .monospacedDigit()
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 12)
-                .adaptiveGlassCard(cornerRadius: 18, tint: store.kind == .focus ? .red.opacity(0.12) : .green.opacity(0.12), opacity: store.glassOpacity)
+                .adaptiveGlassCard(cornerRadius: 18, tint: store.kind == .focus ? .red.opacity(0.12) : .green.opacity(0.12))
 
             HStack {
                 Button(store.isRunning ? "暂停" : (store.kind == .focus ? "开始专注" : "开始休息")) {
@@ -61,7 +62,7 @@ struct ContentView: View {
                 }
             }
             .padding(12)
-            .adaptiveGlassCard(cornerRadius: 14, opacity: store.glassOpacity)
+            .adaptiveGlassCard(cornerRadius: 14)
             .disabled(store.isRunning)
 
             Grid(alignment: .leading, horizontalSpacing: 14, verticalSpacing: 10) {
@@ -94,22 +95,9 @@ struct ContentView: View {
                     }
                     .frame(width: 210)
                 }
-                GridRow {
-                    Text("玻璃透明度")
-                    HStack(spacing: 8) {
-                        Slider(value: Binding(
-                            get: { store.glassOpacity },
-                            set: store.setGlassOpacity
-                        ), in: 0.2...1)
-                        Text("\(Int((store.glassOpacity * 100).rounded()))%")
-                            .monospacedDigit()
-                            .frame(width: 38, alignment: .trailing)
-                    }
-                    .frame(width: 210)
-                }
             }
             .padding(12)
-            .adaptiveGlassCard(cornerRadius: 14, opacity: store.glassOpacity)
+            .adaptiveGlassCard(cornerRadius: 14)
 
             Divider()
 
@@ -134,7 +122,7 @@ struct ContentView: View {
                 Spacer()
             }
             .padding(12)
-            .adaptiveGlassCard(cornerRadius: 14, tint: .orange.opacity(0.12), interactive: true, opacity: store.glassOpacity)
+            .adaptiveGlassCard(cornerRadius: 14, tint: .orange.opacity(0.12), interactive: true)
 
             HStack {
                 Label(TomatoStore.formatStats(store.todayStats.focusSeconds), systemImage: "brain.head.profile")
@@ -159,6 +147,7 @@ struct ContentView: View {
     }
 
     private func showStatisticsWindow() {
+        if let onShowStatistics { onShowStatistics(); return }
         NSApplication.shared.activate(ignoringOtherApps: true)
         openWindow(id: "statistics")
 
