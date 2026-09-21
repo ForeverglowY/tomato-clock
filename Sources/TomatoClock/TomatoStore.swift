@@ -28,6 +28,14 @@ enum AlertSound: String, CaseIterable, Identifiable {
     }
 }
 
+enum StatisticsDisplayMode: String, CaseIterable, Identifiable {
+    case trend
+    case rings
+
+    var id: String { rawValue }
+    var title: String { self == .trend ? "趋势图" : "圆环日历" }
+}
+
 @MainActor
 final class TomatoStore: ObservableObject {
     private enum Keys {
@@ -62,6 +70,24 @@ final class TomatoStore: ObservableObject {
         var id: String { "\(date.timeIntervalSinceReferenceDate)-\(kind.rawValue)" }
     }
 
+    struct GoalDay: Identifiable {
+        let date: Date
+        let focusSeconds: TimeInterval
+        let goalSeconds: TimeInterval
+
+        var id: Date { date }
+        var progress: Double { min(focusSeconds / max(goalSeconds, 1), 1) }
+        var achieved: Bool { focusSeconds >= goalSeconds }
+    }
+
+    struct GoalMonth: Identifiable {
+        let firstDay: Date
+        let leadingEmptyDays: Int
+        let days: [GoalDay]
+
+        var id: Date { firstDay }
+    }
+
     @Published private(set) var focusMinutes: Int {
         didSet {
             defaults.set(focusMinutes, forKey: Keys.focusMinutes)
@@ -88,6 +114,7 @@ final class TomatoStore: ObservableObject {
     @Published private(set) var dailyFocusGoalMinutes: Int {
         didSet { defaults.set(dailyFocusGoalMinutes, forKey: Keys.dailyFocusGoalMinutes) }
     }
+    @Published private(set) var statisticsDisplayMode: StatisticsDisplayMode = .trend
 
     private let defaults: UserDefaults
     private var allStats: [String: DayStats] = [:]
@@ -196,6 +223,27 @@ final class TomatoStore: ObservableObject {
         return Double(filteredAchievedDayCount) / Double(filteredDayCount)
     }
 
+    var goalCalendarMonths: [GoalMonth] {
+        var calendar = Calendar.current
+        calendar.firstWeekday = 2
+        let focusBars = dailyStatBars.filter { $0.kind == .focus }
+        let grouped = Dictionary(grouping: focusBars) { bar in
+            calendar.dateInterval(of: .month, for: bar.date)?.start ?? bar.date
+        }
+        return grouped.keys.sorted().map { firstDay in
+            let bars = (grouped[firstDay] ?? []).sorted { $0.date < $1.date }
+            let weekday = calendar.component(.weekday, from: bars.first?.date ?? firstDay)
+            let leading = (weekday - calendar.firstWeekday + 7) % 7
+            return GoalMonth(
+                firstDay: firstDay,
+                leadingEmptyDays: leading,
+                days: bars.map {
+                    GoalDay(date: $0.date, focusSeconds: $0.seconds, goalSeconds: dailyFocusGoalSeconds)
+                }
+            )
+        }
+    }
+
     func setFocusMinutes(_ minutes: Int) {
         focusMinutes = min(max(minutes, 1), 180)
     }
@@ -206,6 +254,10 @@ final class TomatoStore: ObservableObject {
 
     func setDailyFocusGoalMinutes(_ minutes: Int) {
         dailyFocusGoalMinutes = min(max(minutes, 1), 720)
+    }
+
+    func setStatisticsDisplayMode(_ mode: StatisticsDisplayMode) {
+        statisticsDisplayMode = mode
     }
 
     func setAlertSound(_ sound: AlertSound) {
@@ -465,6 +517,14 @@ final class TomatoStore: ObservableObject {
         formatter.calendar = .current
         formatter.locale = Locale(identifier: "zh_CN")
         formatter.dateFormat = "M月d日"
+        return formatter.string(from: date)
+    }
+
+    static func formatChartMonth(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.calendar = .current
+        formatter.locale = Locale(identifier: "zh_CN")
+        formatter.dateFormat = "yyyy年M月"
         return formatter.string(from: date)
     }
 }

@@ -9,11 +9,29 @@ struct StatisticsView: View {
             header
             rangeControls
             summaryCards
-            chart
+            displayPicker
+            if store.statisticsDisplayMode == .trend {
+                chart
+            } else {
+                GoalCalendarView(store: store)
+            }
             sessionTable
         }
         .padding(20)
         .frame(minWidth: 760, minHeight: 600)
+    }
+
+    private var displayPicker: some View {
+        Picker("统计方式", selection: Binding(
+            get: { store.statisticsDisplayMode },
+            set: store.setStatisticsDisplayMode
+        )) {
+            ForEach(StatisticsDisplayMode.allCases) { mode in
+                Text(mode.title).tag(mode)
+            }
+        }
+        .pickerStyle(.segmented)
+        .frame(width: 220)
     }
 
     private var header: some View {
