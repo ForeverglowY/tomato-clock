@@ -3,6 +3,10 @@ import SwiftUI
 
 struct StatisticsView: View {
     @ObservedObject var store: TomatoStore
+    private var selectedCalendarDate: Date? {
+        get { store.selectedCalendarDate }
+        nonmutating set { store.selectedCalendarDate = newValue }
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -13,12 +17,15 @@ struct StatisticsView: View {
             if store.statisticsDisplayMode == .trend {
                 chart
             } else {
-                GoalCalendarView(store: store)
+                GoalCalendarView(store: store, selectedDate: $store.selectedCalendarDate)
             }
             sessionTable
         }
         .padding(20)
         .frame(minWidth: 760, minHeight: 600)
+        .onChange(of: store.statisticsStartDate) { _, _ in selectedCalendarDate = nil }
+        .onChange(of: store.statisticsEndDate) { _, _ in selectedCalendarDate = nil }
+        .onChange(of: store.statisticsDisplayMode) { _, _ in selectedCalendarDate = nil }
     }
 
     private var displayPicker: some View {
@@ -161,19 +168,28 @@ struct StatisticsView: View {
 
     private var sessionTable: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("时间段明细").font(.headline)
+            HStack {
+                Text(selectedCalendarDate.map { "\(TomatoStore.formatChartDay($0)) · 时间段明细" } ?? "时间段明细")
+                    .font(.headline)
+                Spacer()
+                if selectedCalendarDate != nil {
+                    Button("显示全部日期") { selectedCalendarDate = nil }
+                }
+            }
             tableHeader
-            if store.filteredSessionRecords.isEmpty {
+            if displayedSessionRecords.isEmpty {
                 ContentUnavailableView(
                     "暂无时间段记录",
                     systemImage: "clock.badge.questionmark",
-                    description: Text("新版本开始计时后，每次暂停或完成都会记录在这里。")
+                    description: Text(selectedCalendarDate == nil
+                        ? "每次暂停或完成计时后，都会记录在这里。"
+                        : "当天暂无时间段记录；每次暂停或完成计时后会自动记录。")
                 )
                 .frame(maxWidth: .infinity, minHeight: 110)
             } else {
                 ScrollView {
                     LazyVStack(spacing: 0) {
-                        ForEach(store.filteredSessionRecords) { record in
+                        ForEach(displayedSessionRecords) { record in
                             sessionRow(record)
                             Divider()
                         }
@@ -181,6 +197,20 @@ struct StatisticsView: View {
                 }
                 .frame(minHeight: 120)
             }
+        }
+    }
+
+    private var displayedSessionRecords: [TomatoStore.SessionRecord] {
+        guard let selectedCalendarDate,
+              let interval = Calendar.current.dateInterval(of: .day, for: selectedCalendarDate)
+        else { return store.filteredSessionRecords }
+        // Clip overnight sessions to the selected local calendar day.
+        return store.filteredSessionRecords.compactMap { record in
+            let start = max(record.startDate, interval.start)
+            let end = min(record.endDate, interval.end)
+            guard end > start else { return nil }
+            return TomatoStore.SessionRecord(id: record.id, kind: record.kind,
+                startDate: start, endDate: end, duration: end.timeIntervalSince(start))
         }
     }
 

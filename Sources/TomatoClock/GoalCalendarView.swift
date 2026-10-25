@@ -2,6 +2,7 @@ import SwiftUI
 
 struct GoalCalendarView: View {
     @ObservedObject var store: TomatoStore
+    @Binding var selectedDate: Date?
 
     private let columns = Array(repeating: GridItem(.flexible(), spacing: 10), count: 7)
     private let weekdayNames = ["一", "二", "三", "四", "五", "六", "日"]
@@ -50,6 +51,9 @@ struct GoalCalendarView: View {
     }
 
     private func dayCell(_ day: TomatoStore.GoalDay) -> some View {
+        Button {
+            selectedDate = day.date
+        } label: {
         VStack(spacing: 4) {
             Text(day.date, format: .dateTime.day())
                 .font(.caption.weight(Calendar.current.isDateInToday(day.date) ? .bold : .regular))
@@ -64,9 +68,13 @@ struct GoalCalendarView: View {
                 progress: day.progress,
                 size: 38,
                 lineWidth: 5,
-                showsCenterIcon: false
+                showsCenterIcon: day.achieved
             )
             .opacity(day.focusSeconds > 0 ? 1 : 0.32)
+            .overlay {
+                HoverTrackingView(text: daySummary(day))
+                    .frame(width: 44, height: 44)
+            }
             .overlay(alignment: .topTrailing) {
                 if day.achieved {
                     Circle()
@@ -77,6 +85,19 @@ struct GoalCalendarView: View {
             }
         }
         .frame(maxWidth: .infinity, minHeight: 66)
-        .help("\(TomatoStore.formatChartDay(day.date))：专注 \(TomatoStore.formatPreciseDuration(day.focusSeconds))，目标 \(store.dailyFocusGoalMinutes) 分钟")
+        .padding(4)
+        .background(selectedDate == day.date ? Color.accentColor.opacity(0.12) : Color.clear,
+                    in: RoundedRectangle(cornerRadius: 10))
+        .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(daySummary(day))
+        .accessibilityHint("查看当天专注和休息明细")
+        .accessibilityAddTraits(selectedDate == day.date ? .isSelected : [])
+    }
+
+    private func daySummary(_ day: TomatoStore.GoalDay) -> String {
+        let percentage = Int((day.focusSeconds / max(day.goalSeconds, 1) * 100).rounded())
+        return "\(day.date.formatted(.dateTime.year().month().day()))\n专注 \(TomatoStore.formatPreciseDuration(day.focusSeconds))\n目标 \(store.dailyFocusGoalMinutes) 分钟 · 完成 \(percentage)%"
     }
 }

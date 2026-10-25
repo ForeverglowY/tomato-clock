@@ -47,6 +47,7 @@ final class TomatoStore: ObservableObject {
         static let sessionRecords = "sessionRecords"
         static let dailyFocusGoalMinutes = "dailyFocusGoalMinutes"
         static let lastCelebratedGoalDay = "lastCelebratedGoalDay"
+        static let continueAfterReminder = "continueAfterReminder"
     }
 
     struct DayStats: Codable, Equatable {
@@ -115,6 +116,10 @@ final class TomatoStore: ObservableObject {
         didSet { defaults.set(dailyFocusGoalMinutes, forKey: Keys.dailyFocusGoalMinutes) }
     }
     @Published private(set) var statisticsDisplayMode: StatisticsDisplayMode = .trend
+    @Published private(set) var continueAfterReminder: Bool {
+        didSet { defaults.set(continueAfterReminder, forKey: Keys.continueAfterReminder) }
+    }
+    @Published var selectedCalendarDate: Date?
 
     private let defaults: UserDefaults
     private var allStats: [String: DayStats] = [:]
@@ -124,9 +129,12 @@ final class TomatoStore: ObservableObject {
     private var runningSegmentStart: Date?
     private var runningSegmentBudget: TimeInterval = 0
     private var lastCelebratedGoalDay: String?
+    private var hasSentDurationReminder = false
+    private let durationReminder = DurationReminderPresenter()
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
+        continueAfterReminder = defaults.bool(forKey: Keys.continueAfterReminder)
         let storedFocus = defaults.integer(forKey: Keys.focusMinutes)
         let storedBreak = defaults.integer(forKey: Keys.breakMinutes)
         let validFocus = min(max(storedFocus > 0 ? storedFocus : 25, 1), 180)
@@ -157,10 +165,18 @@ final class TomatoStore: ObservableObject {
     var focusDuration: TimeInterval { TimeInterval(focusMinutes * 60) }
     var breakDuration: TimeInterval { TimeInterval(breakMinutes * 60) }
     var isRunning: Bool { engine.isRunning }
+    var hasActiveSession: Bool { engine.isRunning || engine.remaining < engine.duration }
     var kind: SessionKind { engine.kind }
     var menuBarTitle: String { "\(kind == .focus ? "🍅" : "☕️") \(formattedRemaining)" }
-    var formattedRemaining: String { Self.formatCountdown(engine.remaining) }
+    var formattedRemaining: String {
+        engine.continuesAfterDeadline && engine.remaining <= 0
+            ? "+\(Self.formatCountdown(-engine.remaining))"
+            : Self.formatCountdown(engine.remaining)
+    }
     var statusText: String {
+        if engine.continuesAfterDeadline, engine.remaining <= 0 {
+            return engine.isRunning ? "已到时，继续计时" : "已到时，已暂停"
+        }
         if engine.isRunning { return kind == .focus ? "正在专注" : "正在休息" }
         if engine.remaining == 0 { return kind == .focus ? "专注完成" : "休息完成" }
         return kind == .focus ? "准备专注" : "准备休息"
@@ -303,8 +319,13 @@ final class TomatoStore: ObservableObject {
         if engine.isRunning {
             record(engine.pause(at: now), for: engine.kind, at: now)
             if finishRunningSegment(at: now) { showGoalCelebration() }
+            remindIfNeeded()
         } else {
-            if engine.remaining == 0 {
+            if !hasActiveSession {
+                engine.continuesAfterDeadline = continueAfterReminder
+                hasSentDurationReminder = false
+            }
+            if engine.remaining == 0, !engine.continuesAfterDeadline {
                 engine.reset(duration: duration(for: engine.kind))
             }
             beginRunningSegment(at: now)
@@ -313,27 +334,43 @@ final class TomatoStore: ObservableObject {
     }
 
     func resetCurrent() {
-        if engine.isRunning {
-            let now = Date.now
-            record(engine.pause(at: now), for: engine.kind, at: now)
-            if finishRunningSegment(at: now) { showGoalCelebration() }
-        }
+        stopCurrentSession()
+    }
+
+    func stopCurrentSession() {
+        // Pausing records elapsed time; stopping must never bypass that step.
+        guard !engine.isRunning else { return }
         engine.reset(duration: duration(for: engine.kind))
+        hasSentDurationReminder = false
+        durationReminder.dismiss()
+    }
+
+    func setContinueAfterReminder(_ enabled: Bool) {
+        guard !hasActiveSession else { return }
+        continueAfterReminder = enabled
+        engine.continuesAfterDeadline = enabled
+    }
+
+    func finishCurrentPhase() {
+        guard hasActiveSession, !engine.isRunning, engine.continuesAfterDeadline else { return }
+        let next = engine.kind.next
+        engine.prepare(next, duration: duration(for: next))
+        hasSentDurationReminder = false
+        durationReminder.dismiss()
     }
 
     func switchSession() {
-        if engine.isRunning {
-            let now = Date.now
-            record(engine.pause(at: now), for: engine.kind, at: now)
-            if finishRunningSegment(at: now) { showGoalCelebration() }
-        }
+        guard !hasActiveSession else { return }
         let next = engine.kind.next
         engine.prepare(next, duration: duration(for: next))
+        hasSentDurationReminder = false
+        durationReminder.dismiss()
     }
 
     func startPreparedSession() {
         if engine.remaining == 0 { switchSession() }
         let now = Date.now
+        engine.continuesAfterDeadline = continueAfterReminder
         beginRunningSegment(at: now)
         engine.start(at: now)
     }
@@ -344,6 +381,7 @@ final class TomatoStore: ObservableObject {
         let completedKind = engine.kind
         let elapsed = engine.advance(to: .now)
         record(elapsed, for: completedKind, at: .now)
+        remindIfNeeded()
         if wasRunning, !engine.isRunning, engine.remaining == 0 {
             let reachedGoal = finishRunningSegment(at: .now)
             let next = completedKind.next
@@ -352,6 +390,16 @@ final class TomatoStore: ObservableObject {
             else { playAlertSound() }
             showCompletionAlert(completedKind: completedKind, nextKind: next, reachedGoal: reachedGoal)
         }
+    }
+
+    private func remindIfNeeded() {
+        guard engine.continuesAfterDeadline, engine.remaining <= 0, !hasSentDurationReminder else { return }
+        hasSentDurationReminder = true
+        playAlertSound()
+        durationReminder.show(
+            title: engine.kind == .focus ? "专注时长已到" : "休息时长已到",
+            message: "当前阶段仍在继续计时，额外时长也会计入统计。准备结束时，请先暂停，再点击“结束”。"
+        )
     }
 
     private var statisticsDateInterval: DateInterval {
@@ -364,7 +412,7 @@ final class TomatoStore: ObservableObject {
 
     private func beginRunningSegment(at date: Date) {
         runningSegmentStart = date
-        runningSegmentBudget = engine.remaining
+        runningSegmentBudget = engine.continuesAfterDeadline ? .infinity : engine.remaining
     }
 
     private func finishRunningSegment(at date: Date, evaluateGoal: Bool = true) -> Bool {

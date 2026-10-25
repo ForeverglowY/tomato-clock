@@ -23,14 +23,25 @@ struct ContentView: View {
                 .adaptiveGlassCard(cornerRadius: 18, tint: store.kind == .focus ? .red.opacity(0.12) : .green.opacity(0.12))
 
             HStack {
-                Button(store.isRunning ? "暂停" : (store.kind == .focus ? "开始专注" : "开始休息")) {
+                Button(store.isRunning ? "暂停" : (store.hasActiveSession ? "继续" : (store.kind == .focus ? "开始专注" : "开始休息"))) {
                     store.toggleRunning()
                 }
                 .adaptivePrimaryButton(tint: store.kind == .focus ? .red : .green)
                 .keyboardShortcut(.space, modifiers: [])
 
-                Button("重置") { store.resetCurrent() }
+                if store.hasActiveSession {
+                    Button(store.continueAfterReminder ? "结束" : "停止") {
+                        if store.continueAfterReminder { store.finishCurrentPhase() }
+                        else { store.stopCurrentSession() }
+                    }
+                        .disabled(store.isRunning)
+                        .help(store.isRunning ? "请先暂停，再结束计时" : (store.continueAfterReminder ? "结束当前阶段，准备下一阶段，保留已记录时长" : "结束本轮并重置倒计时，保留已记录的时长"))
+                } else {
+                    Button("重置") { store.resetCurrent() }
+                }
                 Button(store.kind == .focus ? "切换到休息" : "切换到专注") { store.switchSession() }
+                    .disabled(store.hasActiveSession)
+                    .help(store.hasActiveSession ? "请先停止当前计时，再切换阶段" : "切换计时阶段")
             }
 
             Divider()
@@ -63,7 +74,15 @@ struct ContentView: View {
             }
             .padding(12)
             .adaptiveGlassCard(cornerRadius: 14)
-            .disabled(store.isRunning)
+            .disabled(store.hasActiveSession)
+
+            Toggle("到时只提醒，手动结束", isOn: Binding(
+                get: { store.continueAfterReminder },
+                set: store.setContinueAfterReminder
+            ))
+            .toggleStyle(.switch)
+            .disabled(store.hasActiveSession)
+            .help("开启后，专注和休息到时仍继续计时；先暂停，再点击结束。下轮需手动开始。")
 
             Grid(alignment: .leading, horizontalSpacing: 14, verticalSpacing: 10) {
                 GridRow {
@@ -134,7 +153,7 @@ struct ContentView: View {
 
             Divider()
             HStack {
-                Text("计时结束后会等待你手动开始下一阶段")
+                Text(store.continueAfterReminder ? "到时继续计时，暂停后手动结束本阶段" : "计时结束后会等待你手动开始下一阶段")
                     .font(.caption)
                     .foregroundStyle(.tertiary)
                 Spacer()

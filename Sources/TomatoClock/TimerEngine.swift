@@ -12,6 +12,7 @@ struct TimerEngine: Equatable, Sendable {
     var duration: TimeInterval
     var remaining: TimeInterval
     var isRunning = false
+    var continuesAfterDeadline = false
     private(set) var lastUpdate: Date?
 
     init(kind: SessionKind = .focus, duration: TimeInterval) {
@@ -21,7 +22,7 @@ struct TimerEngine: Equatable, Sendable {
     }
 
     mutating func start(at date: Date) {
-        guard !isRunning, remaining > 0 else { return }
+        guard !isRunning, remaining > 0 || continuesAfterDeadline else { return }
         isRunning = true
         lastUpdate = date
     }
@@ -49,10 +50,10 @@ struct TimerEngine: Equatable, Sendable {
     mutating func advance(to date: Date) -> TimeInterval {
         guard isRunning, let lastUpdate else { return 0 }
         let elapsed = max(0, date.timeIntervalSince(lastUpdate))
-        let counted = min(elapsed, remaining)
+        let counted = continuesAfterDeadline ? elapsed : min(elapsed, max(remaining, 0))
         remaining -= counted
         self.lastUpdate = date
-        if remaining <= 0 {
+        if remaining <= 0, !continuesAfterDeadline {
             remaining = 0
             isRunning = false
             self.lastUpdate = nil
